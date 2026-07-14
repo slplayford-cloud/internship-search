@@ -10,3 +10,6 @@ wheels/
 .venv
 
 .env
+
+# Local record of listings already reported
+seen_urls.txt
