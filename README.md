@@ -39,9 +39,11 @@ Put it in `.env`:
 NTFY_TOPIC="a1b2c3d4e5f6...."
 ```
 
-Because anyone with the topic name can read it, **the notification body deliberately contains only
-a count** ("3 new internship listings") — never company names, roles, or links to what you're
-tracking. Keep it that way: don't put anything in a message body you wouldn't publish.
+Anyone with the topic name can read the feed, but that's fine: listings are scraped from public
+GitHub READMEs, so **the notification includes full details** (company, role, location, apply
+link) — one push per new listing, so tapping it opens the apply link directly. A cold-start run
+with a lot of new listings sends one summary notification instead, so you don't get buzzed dozens
+of times at once.
 
 ### 2. Subscribe on the phone
 
@@ -76,18 +78,50 @@ Sends are HTTPS-only. A `NTFY_SERVER` starting with `http://` is refused, so a t
 topic and token on the wire in cleartext. Override with `NTFY_ALLOW_INSECURE=1` only for a trusted
 server on your own network.
 
+## Phone approval
+
+Each listing's notification carries two buttons, "Hank interested" and "Steve interested". Tapping
+one writes `planning to apply` straight into that person's column (F and E respectively) on the
+tracker sheet — no need to open the sheet at all. This is optional; without it, notifications work
+exactly as described above, just without the buttons.
+
+ntfy can't call back into a machine on your desk to make this happen, so the buttons POST to a tiny
+Google Apps Script Web App bound to the sheet instead — free, hosted by Google, nothing to run or
+maintain.
+
+1. Open the tracker sheet, then **Extensions → Apps Script**.
+2. Delete the placeholder code and paste in [`appscript/Code.gs`](appscript/Code.gs) (already
+   set to your tab name, "Internship & Job Tracker" — update `SHEET_NAME` if you ever rename it).
+3. **Deploy → New deployment → Web app**. Set "Execute as" to **Me** and "Who has access" to
+   **Anyone** (this is what lets ntfy's server reach it — the deployment URL itself is the only
+   thing standing in for auth, similar to the ntfy topic).
+4. Copy the deployment URL into `.env`:
+   ```sh
+   APPROVAL_WEBHOOK_URL="https://script.google.com/macros/s/XXXXXXXX/exec"
+   ```
+5. Make sure `planning to apply` is one of the allowed options in both E's and F's dropdown
+   validation, or Sheets will flag the cell even though the value was written correctly.
+
+Redeploying after editing the script requires **Deploy → Manage deployments → Edit → New
+version** — saving in the editor alone doesn't update the live URL.
+
+If you ever want to stop randoms who find the URL from writing to your sheet, set `SECRET` in
+`Code.gs` to some random string and put the same value in `APPROVAL_WEBHOOK_SECRET` in `.env`.
+
 ## Running
 
 ```sh
 uv run main.py
 ```
 
-Prints any listings it hasn't seen before, records them in `seen_urls.txt`, and — if there were
-any — sends one notification with the count. A listing is identified by its apply URL, so it's
-announced exactly once. Run it again straight away and you'll get `0 new` and no notification.
+Prints any listings it hasn't seen before, records them in `seen_urls.txt`, and sends one
+notification per new listing (or a single summary notification if there are a lot at once — see
+`NOTIFY_BATCH_LIMIT` in `main.py`). A listing is identified by its apply URL, so it's announced
+exactly once. Run it again straight away and you'll get `0 new` and no notification.
 
 A first run on a fresh machine (no `seen_urls.txt`) treats every listing as new, so expect a single
-"189 new internship listings" notification, and then quiet.
+"189 new internship listings — too many to list individually" summary notification, and then
+quiet.
 
 ### Cron
 
@@ -109,9 +143,11 @@ or a log watcher will surface it.
 |---|---|
 | `main.py` | Entry point: scrape, diff against seen, print, notify. |
 | `notify.py` | The single place that talks to ntfy. |
+| `sheets.py` | Writes new listings to the tracker sheet. |
 | `store.py` | Remembers seen listings (`seen_urls.txt`), keyed by apply URL. |
 | `models.py` | The `Listing` record shared by every source. |
 | `scrapers/` | One module per source, over a shared Markdown-table base. |
+| `appscript/Code.gs` | Web App pasted into Apps Script; receives phone-approval button taps. |
 
 Adding a source means writing one `Scraper` subclass in `scrapers/` and adding its URL to the
 `SOURCES` map in `main.py`.

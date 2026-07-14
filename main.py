@@ -2,8 +2,8 @@
 """Scrape the source repos named in .env and report the listings we haven't seen before."""
 
 import argparse
+import json
 import os
-import re
 import sys
 
 import requests
@@ -32,16 +32,6 @@ def configured_scrapers() -> list[Scraper]:
     return scrapers
 
 
-RAW_README = re.compile(r"https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/")
-
-
-def repo_page(url: str) -> str:
-    """The repo page behind a raw README URL — tapping a notification should open that, not
-    a screenful of raw Markdown."""
-    match = RAW_README.match(url)
-    return f"https://github.com/{match[1]}/{match[2]}" if match else url
-
-
 def scrape_all(scrapers: list[Scraper]) -> tuple[list[Listing], bool]:
     listings: list[Listing] = []
     failed = False
@@ -64,6 +54,69 @@ def sheet_env() -> tuple[str, str] | None:
         print("GOOGLE_SHEET_ID / GOOGLE_SHEETS_CREDENTIALS_FILE not set", file=sys.stderr)
         return None
     return sheet_id, credentials_file
+
+
+NOTIFY_BATCH_LIMIT = 20
+"""Above this many new listings in one run (a cold start, typically), send one summary
+notification instead of one per listing — nobody wants 189 buzzes at once."""
+
+# label -> sheet column each person's "interested" button writes to.
+INTEREST_BUTTONS = {"Hank interested": "F", "Steve interested": "E"}
+INTEREST_VALUE = "Planning to Apply"  # must match the sheet's E/F dropdown option exactly (strict validation)
+
+
+def approval_actions(listing: Listing) -> list[dict]:
+    """Tappable buttons for a listing's notification, one per person. Each POSTs straight to the
+    Apps Script web app bound to the sheet (see appscript/Code.gs), which finds the row by apply
+    URL and writes INTEREST_VALUE into that person's column — no server of our own to run.
+    """
+    webhook = os.getenv("APPROVAL_WEBHOOK_URL")
+    if not webhook:
+        return []
+
+    secret = os.getenv("APPROVAL_WEBHOOK_SECRET")
+
+    def action(label: str, column: str) -> dict:
+        body = {"url": listing.url, "column": column, "value": INTEREST_VALUE}
+        if secret:
+            body["secret"] = secret
+        return {
+            "action": "http",
+            "label": label,
+            "url": webhook,
+            "method": "POST",
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(body),
+        }
+
+    return [action(label, column) for label, column in INTEREST_BUTTONS.items()]
+
+
+def notify_new(new: list[Listing]) -> bool:
+    """Notify about new listings. The source data is public, so the notification carries full
+    details, not just a count — one push per listing, so tapping it opens that listing's apply
+    link directly, with buttons to mark interest without leaving the notification.
+    """
+    if not new:
+        return True
+
+    if len(new) > NOTIFY_BATCH_LIMIT:
+        return send(
+            f"{len(new)} new internship listings — too many to list individually",
+            title="Internship tracker",
+            tags="briefcase",
+        )
+
+    delivered = True
+    for listing in new:
+        if not send(
+            str(listing),
+            title="Internship tracker",
+            tags="briefcase",
+            actions=approval_actions(listing),
+        ):
+            delivered = False
+    return delivered
 
 
 def main() -> int:
@@ -96,30 +149,19 @@ def main() -> int:
     seen = load_seen()
     new = new_listings(listings, seen)
 
-    #send to phone
-    #approval comes in
-    approved = new  # TODO: swap in the real approval list once the phone flow lands
-
-    env = sheet_env()
-    if env:
-        write_listings(approved, *env)
-
     for listing in new:
         print(listing, end="\n\n")
     print(f"{len(new)} new of {len(listings)} listings ({len(seen)} seen before)")
 
     # Save before notifying: a listing already recorded as seen won't be announced twice, even if
-    # the push fails. Only the count goes out — see notify.py on why the body stays contentless.
+    # the push fails.
     save_seen(seen | {listing.url for listing in new if listing.url})
 
-    plural = "s" if len(new) > 1 else ""
-    delivered = send(
-        f"{len(new)} new internship listing{plural}",
-        title="Internship tracker",
-        tags="briefcase",
-        click=repo_page(scrapers[0].url),
-    )
-    failed = failed or not delivered
+    failed = failed or not notify_new(new)
+
+    env = sheet_env()
+    if env:
+        write_listings(new, *env)  # TODO: swap in the real approval list once the phone flow lands
 
     return 1 if failed else 0
 
