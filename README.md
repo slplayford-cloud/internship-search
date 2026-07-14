@@ -80,10 +80,15 @@ server on your own network.
 
 ## Phone approval
 
-Each listing's notification carries two buttons, "Hank interested" and "Steve interested". Tapping
-one writes `planning to apply` straight into that person's column (F and E respectively) on the
-tracker sheet — no need to open the sheet at all. This is optional; without it, notifications work
-exactly as described above, just without the buttons.
+Each listing's notification carries three buttons: "Hank interested", "Steve interested", and
+"Not interested". Tapping an interested button writes `planning to apply` straight into that
+person's column (G and F respectively) on the tracker sheet — no need to open the sheet at all.
+Tapping **Not interested** disposes of the listing: the row moves off the tracker tab onto a
+`Discarded` tab (created automatically), so the workspace only holds listings someone wants.
+ntfy allows at most three buttons per notification, so "Not interested" is shared — either person
+tapping it discards the listing for both, and a mistaken tap is undone by cut-and-pasting the row
+back from `Discarded`. This is optional; without it, notifications work exactly as described
+above, just without the buttons.
 
 ntfy can't call back into a machine on your desk to make this happen, so the buttons POST to a tiny
 Google Apps Script Web App bound to the sheet instead — free, hosted by Google, nothing to run or
@@ -99,7 +104,7 @@ maintain.
    ```sh
    APPROVAL_WEBHOOK_URL="https://script.google.com/macros/s/XXXXXXXX/exec"
    ```
-5. Make sure `planning to apply` is one of the allowed options in both E's and F's dropdown
+5. Make sure `planning to apply` is one of the allowed options in both F's and G's dropdown
    validation, or Sheets will flag the cell even though the value was written correctly.
 
 Redeploying after editing the script requires **Deploy → Manage deployments → Edit → New
@@ -116,12 +121,37 @@ uv run main.py
 
 Prints any listings it hasn't seen before, records them in `seen_urls.txt`, and sends one
 notification per new listing (or a single summary notification if there are a lot at once — see
-`NOTIFY_BATCH_LIMIT` in `main.py`). A listing is identified by its apply URL, so it's announced
-exactly once. Run it again straight away and you'll get `0 new` and no notification.
+`NOTIFY_BATCH_LIMIT` in `main.py`). A listing is identified by its apply URL — *canonicalized*,
+so the same job listed by two sources under cosmetically different links (one repo appends
+`?utm_source=...` to everything, and Greenhouse jobs appear under both `boards.greenhouse.io`
+and `job-boards.greenhouse.io`) still counts as one job and is announced exactly once. Run it
+again straight away and you'll get `0 new` and no notification.
 
 A first run on a fresh machine (no `seen_urls.txt`) treats every listing as new, so expect a single
 "189 new internship listings — too many to list individually" summary notification, and then
 quiet.
+
+### Disposing of listings you don't want
+
+Two ways to keep the tracker tab from filling with listings nobody cares about:
+
+- **From the phone**: tap **Not interested** on the notification — the row moves to the
+  `Discarded` tab immediately (see "Phone approval" above).
+- **In bulk**: once you've triaged what's in the sheet, run
+
+  ```sh
+  uv run main.py --prune
+  ```
+
+  Every row where both statuses (F and G) are blank or `Not Planning to Apply` moves to the
+  `Discarded` tab. Rows where anyone has a real status — Planning to Apply, Submitted, In
+  Progress, Rejected — stay put, and a blank status on a kept row is set to `Not Planning to
+  Apply`, so "the other person passed on this one" is recorded explicitly instead of left as an
+  empty dropdown. Run it whenever the tab feels cluttered; it's deliberately manual so
+  freshly-scraped rows you haven't looked at yet aren't swept away by cron.
+
+Either way the listing stays in `seen_urls.txt`, so disposing of it never causes it to be
+re-announced or re-added.
 
 ### Cron
 
@@ -143,8 +173,8 @@ or a log watcher will surface it.
 |---|---|
 | `main.py` | Entry point: scrape, diff against seen, print, notify. |
 | `notify.py` | The single place that talks to ntfy. |
-| `sheets.py` | Writes new listings to the tracker sheet. |
-| `store.py` | Remembers seen listings (`seen_urls.txt`), keyed by apply URL. |
+| `sheets.py` | Writes new listings to the tracker sheet; prunes uninterested rows to `Discarded`. |
+| `store.py` | Remembers seen listings (`seen_urls.txt`), keyed by canonicalized apply URL. |
 | `models.py` | The `Listing` record shared by every source. |
 | `scrapers/` | One module per source, over a shared Markdown-table base. |
 | `appscript/Code.gs` | Web App pasted into Apps Script; receives phone-approval button taps. |
