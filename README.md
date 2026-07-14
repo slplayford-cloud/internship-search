@@ -80,10 +80,15 @@ server on your own network.
 
 ## Phone approval
 
-Each listing's notification carries two buttons, "Hank interested" and "Steve interested". Tapping
-one writes `planning to apply` straight into that person's column (F and E respectively) on the
-tracker sheet — no need to open the sheet at all. This is optional; without it, notifications work
-exactly as described above, just without the buttons.
+Each listing's notification carries three buttons: "Hank interested", "Steve interested", and
+"Not interested". Tapping an interested button writes `planning to apply` straight into that
+person's column (F and E respectively) on the tracker sheet — no need to open the sheet at all.
+Tapping **Not interested** disposes of the listing: the row moves off the tracker tab onto a
+`Discarded` tab (created automatically), so the workspace only holds listings someone wants.
+ntfy allows at most three buttons per notification, so "Not interested" is shared — either person
+tapping it discards the listing for both, and a mistaken tap is undone by cut-and-pasting the row
+back from `Discarded`. This is optional; without it, notifications work exactly as described
+above, just without the buttons.
 
 ntfy can't call back into a machine on your desk to make this happen, so the buttons POST to a tiny
 Google Apps Script Web App bound to the sheet instead — free, hosted by Google, nothing to run or
@@ -123,6 +128,26 @@ A first run on a fresh machine (no `seen_urls.txt`) treats every listing as new,
 "189 new internship listings — too many to list individually" summary notification, and then
 quiet.
 
+### Disposing of listings you don't want
+
+Two ways to keep the tracker tab from filling with listings nobody cares about:
+
+- **From the phone**: tap **Not interested** on the notification — the row moves to the
+  `Discarded` tab immediately (see "Phone approval" above).
+- **In bulk**: once you've triaged what's in the sheet, run
+
+  ```sh
+  uv run main.py --prune
+  ```
+
+  Every row where neither E nor F has a status (or where one says `not interested`, if you typed
+  that by hand) moves to the `Discarded` tab. Rows with any real status — planning to apply,
+  applied, whatever your dropdowns hold — stay put. Run it whenever the tab feels cluttered; it's
+  deliberately manual so freshly-scraped rows you haven't looked at yet aren't swept away by cron.
+
+Either way the listing stays in `seen_urls.txt`, so disposing of it never causes it to be
+re-announced or re-added.
+
 ### Cron
 
 Cron doesn't read your shell profile and starts in `$HOME`, so `cd` into the project first — the
@@ -143,7 +168,7 @@ or a log watcher will surface it.
 |---|---|
 | `main.py` | Entry point: scrape, diff against seen, print, notify. |
 | `notify.py` | The single place that talks to ntfy. |
-| `sheets.py` | Writes new listings to the tracker sheet. |
+| `sheets.py` | Writes new listings to the tracker sheet; prunes uninterested rows to `Discarded`. |
 | `store.py` | Remembers seen listings (`seen_urls.txt`), keyed by apply URL. |
 | `models.py` | The `Listing` record shared by every source. |
 | `scrapers/` | One module per source, over a shared Markdown-table base. |

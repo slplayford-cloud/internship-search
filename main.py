@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from models import Listing
 from notify import send
 from scrapers import Scraper, SpeedyApplyScraper, Summer2027Scraper
-from sheets import clear_sheet, write_listings
+from sheets import DISCARD_TAB, clear_sheet, prune_uninterested, write_listings
 from store import load_seen, new_listings, save_seen
 
 SOURCES: dict[str, type[Scraper]] = {
@@ -66,9 +66,13 @@ INTEREST_VALUE = "Planning to Apply"  # must match the sheet's E/F dropdown opti
 
 
 def approval_actions(listing: Listing) -> list[dict]:
-    """Tappable buttons for a listing's notification, one per person. Each POSTs straight to the
-    Apps Script web app bound to the sheet (see appscript/Code.gs), which finds the row by apply
-    URL and writes INTEREST_VALUE into that person's column — no server of our own to run.
+    """Tappable buttons for a listing's notification: one "interested" per person, plus a shared
+    "Not interested". Each POSTs straight to the Apps Script web app bound to the sheet (see
+    appscript/Code.gs), which finds the row by apply URL and either writes INTEREST_VALUE into
+    that person's column or moves the row to the Discarded tab — no server of our own to run.
+
+    ntfy caps a notification at three actions, so "Not interested" is one shared button: either
+    person tapping it disposes of the listing for both.
     """
     webhook = os.getenv("APPROVAL_WEBHOOK_URL")
     if not webhook:
@@ -76,8 +80,7 @@ def approval_actions(listing: Listing) -> list[dict]:
 
     secret = os.getenv("APPROVAL_WEBHOOK_SECRET")
 
-    def action(label: str, column: str) -> dict:
-        body = {"url": listing.url, "column": column, "value": INTEREST_VALUE}
+    def action(label: str, body: dict) -> dict:
         if secret:
             body["secret"] = secret
         return {
@@ -89,7 +92,11 @@ def approval_actions(listing: Listing) -> list[dict]:
             "body": json.dumps(body),
         }
 
-    return [action(label, column) for label, column in INTEREST_BUTTONS.items()]
+    interest = [
+        action(label, {"op": "interest", "url": listing.url, "column": column, "value": INTEREST_VALUE})
+        for label, column in INTEREST_BUTTONS.items()
+    ]
+    return interest + [action("Not interested", {"op": "dismiss", "url": listing.url})]
 
 
 def notify_new(new: list[Listing]) -> bool:
@@ -128,14 +135,23 @@ def main() -> int:
         action="store_true",
         help="clear tracked listings from the sheet (rows below the header) and exit",
     )
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help=f"move sheet rows nobody marked interest in to the '{DISCARD_TAB}' tab and exit",
+    )
     args = parser.parse_args()
 
-    if args.clear_sheet:
+    if args.clear_sheet or args.prune:
         env = sheet_env()
         if not env:
             return 1
-        clear_sheet(*env)
-        print("Cleared sheet data rows.")
+        if args.clear_sheet:
+            clear_sheet(*env)
+            print("Cleared sheet data rows.")
+        if args.prune:
+            moved = prune_uninterested(*env)
+            print(f"Moved {moved} uninterested listing(s) to the '{DISCARD_TAB}' tab.")
         return 0
 
     try:
@@ -161,7 +177,9 @@ def main() -> int:
 
     env = sheet_env()
     if env:
-        write_listings(new, *env)  # TODO: swap in the real approval list once the phone flow lands
+        # Every new listing lands in the sheet as an inbox; the "Not interested" button and
+        # --prune are how the unwanted ones leave it again.
+        write_listings(new, *env)
 
     return 1 if failed else 0
 
