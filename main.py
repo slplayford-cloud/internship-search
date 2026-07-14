@@ -3,12 +3,14 @@
 
 import argparse
 import os
+import re
 import sys
 
 import requests
 from dotenv import load_dotenv
 
 from models import Listing
+from notify import send
 from scrapers import Scraper, SpeedyApplyScraper, Summer2027Scraper
 from sheets import clear_sheet, write_listings
 from store import load_seen, new_listings, save_seen
@@ -28,6 +30,16 @@ def configured_scrapers() -> list[Scraper]:
     if not scrapers:
         raise LookupError(f"set at least one of {', '.join(SOURCES)} in the environment or .env")
     return scrapers
+
+
+RAW_README = re.compile(r"https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/")
+
+
+def repo_page(url: str) -> str:
+    """The repo page behind a raw README URL — tapping a notification should open that, not
+    a screenful of raw Markdown."""
+    match = RAW_README.match(url)
+    return f"https://github.com/{match[1]}/{match[2]}" if match else url
 
 
 def scrape_all(scrapers: list[Scraper]) -> tuple[list[Listing], bool]:
@@ -96,7 +108,19 @@ def main() -> int:
         print(listing, end="\n\n")
     print(f"{len(new)} new of {len(listings)} listings ({len(seen)} seen before)")
 
+    # Save before notifying: a listing already recorded as seen won't be announced twice, even if
+    # the push fails. Only the count goes out — see notify.py on why the body stays contentless.
     save_seen(seen | {listing.url for listing in new if listing.url})
+
+    plural = "s" if len(new) > 1 else ""
+    delivered = send(
+        f"{len(new)} new internship listing{plural}",
+        title="Internship tracker",
+        tags="briefcase",
+        click=repo_page(scrapers[0].url),
+    )
+    failed = failed or not delivered
+
     return 1 if failed else 0
 
 
