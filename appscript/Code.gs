@@ -3,7 +3,7 @@
 // Receives a POST from an ntfy notification action button — {op, url, ...[, secret]} — and finds
 // the row whose Link column (D) matches `url`. Two ops:
 //
-//   {op: "interest", url, column, value}  writes `value` into `column` (E or F) on that row
+//   {op: "interest", url, column, value}  writes `value` into `column` (F or G) on that row
 //   {op: "dismiss", url}                  moves that row to the Discarded tab
 //
 // A body with no `op` is treated as "interest", so buttons from notifications sent before the
@@ -16,7 +16,7 @@
 const SHEET_NAME = "Internship & Job Tracker";
 const DISCARD_SHEET_NAME = "Discarded";
 const LINK_COLUMN = 4; // D
-const LAST_COLUMN = 6; // F
+const LAST_COLUMN = 7; // G
 const SECRET = ""; // optional: set to match APPROVAL_WEBHOOK_SECRET in .env
 
 function doPost(e) {
@@ -62,5 +62,5 @@ function dismissRow(sheet, row) {
 }
 
 function columnLetterToIndex(letter) {
-  return letter.toUpperCase().charCodeAt(0) - 64; // "A" -> 1, "E" -> 5, "F" -> 6
+  return letter.toUpperCase().charCodeAt(0) - 64; // "A" -> 1, "F" -> 6, "G" -> 7
 }

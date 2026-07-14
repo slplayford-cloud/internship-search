@@ -60,9 +60,9 @@ NOTIFY_BATCH_LIMIT = 20
 """Above this many new listings in one run (a cold start, typically), send one summary
 notification instead of one per listing — nobody wants 189 buzzes at once."""
 
-# label -> sheet column each person's "interested" button writes to.
-INTEREST_BUTTONS = {"Hank interested": "F", "Steve interested": "E"}
-INTEREST_VALUE = "Planning to Apply"  # must match the sheet's E/F dropdown option exactly (strict validation)
+# label -> sheet column each person's "interested" button writes to (F=Stephen, G=Henry).
+INTEREST_BUTTONS = {"Hank interested": "G", "Steve interested": "F"}
+INTEREST_VALUE = "Planning to Apply"  # must match the sheet's F/G dropdown option exactly (strict validation)
 
 
 def approval_actions(listing: Listing) -> list[dict]:
