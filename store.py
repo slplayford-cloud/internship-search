@@ -30,6 +30,8 @@ def canonical_url(url: str) -> str:
     """
     parts = urlsplit(url.strip())
     host = parts.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
     host = HOST_ALIASES.get(host, host)
     query = urlencode(
         [
